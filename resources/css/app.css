@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Dark mode adjustments for common utility classes so existing views look good */
+@layer base {
+  .dark .bg-white {
+    @apply bg-gray-800;
+  }
+
+  .dark .bg-gray-50 {
+    @apply bg-gray-800;
+  }
+
+  .dark .bg-gray-100 {
+    @apply bg-gray-900;
+  }
+
+  .dark .text-gray-900,
+  .dark .text-gray-800 {
+    @apply text-gray-100;
+  }
+
+  .dark .text-gray-700 {
+    @apply text-gray-200;
+  }
+
+  .dark .text-gray-600 {
+    @apply text-gray-300;
+  }
+
+  .dark .border-gray-200,
+  .dark .border-gray-300 {
+    @apply border-gray-700;
+  }
+
+  .dark .hover\:bg-gray-50:hover,
+  .dark .hover\:bg-gray-100:hover {
+    @apply hover:bg-gray-800;
+  }
+
+  .dark .shadow-sm,
+  .dark .shadow {
+    @apply shadow-lg;
+  }
+}
+

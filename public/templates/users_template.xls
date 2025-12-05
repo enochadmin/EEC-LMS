@@ -1,0 +1,3 @@
+Employee_ID,First_Name,Last_Name,Email,Role,Department
+EMP001,John,Doe,john.doe@example.com,learner,Human Resources
+EMP002,Jane,Smith,jane.smith@example.com,instructor,Human Resources
