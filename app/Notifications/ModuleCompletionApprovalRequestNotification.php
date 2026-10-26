@@ -34,6 +34,7 @@ class ModuleCompletionApprovalRequestNotification extends Notification
             'learner_name' => $this->learner->name,
             'module_title' => $this->module->title,
             'type' => 'module_completion_approval_request',
+            'url' => route('module-approvals.index'),
         ];
     }
 }

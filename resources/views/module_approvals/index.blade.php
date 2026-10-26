@@ -54,17 +54,24 @@
                                                 {{ $approval->created_at->diffForHumans() }}
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                <form action="{{ route('module-approvals.approve', $approval) }}" method="POST" class="inline-block">
+                                                <form action="{{ route('module-approvals.approve', $approval) }}" method="POST" class="inline-flex items-center gap-2">
                                                     @csrf
                                                     @method('PATCH')
+                                                    <input type="date" name="valid_until" title="{{ __('Certificate expiry (optional)') }}"
+                                                        class="w-36 rounded-md border-gray-300 shadow-sm text-sm" />
                                                     <button type="submit" class="text-green-600 hover:text-green-900 mr-3" onclick="return confirm('Approve this module completion and issue a certificate?')">
                                                         Approve
                                                     </button>
                                                 </form>
-                                                <form action="{{ route('module-approvals.reject', $approval) }}" method="POST" class="inline-block">
+                                                <span class="block text-xs text-gray-400 mt-1">
+                                                    {{ __('Leave the date empty for a certificate that never expires.') }}
+                                                </span>
+                                                <form action="{{ route('module-approvals.reject', $approval) }}" method="POST" class="inline-flex items-center gap-2">
                                                     @csrf
                                                     @method('PATCH')
-                                                    <button type="submit" class="text-red-600 hover:text-red-900" onclick="return confirm('Reject this module completion request?')">
+                                                    <input type="text" name="reason" required placeholder="{{ __('Reason for rejection') }}"
+                                                        class="w-44 rounded-md border-gray-300 shadow-sm text-sm" />
+                                                    <button type="submit" class="text-red-600 hover:text-red-900">
                                                         Reject
                                                     </button>
                                                 </form>

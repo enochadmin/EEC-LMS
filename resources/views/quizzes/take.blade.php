@@ -1,6 +1,6 @@
 <x-app-layout>
     <x-slot name="header">
-        <div class="flex items-center justify-between">
+        <div class="flex w-full items-center justify-between gap-3">
             <div>
                 <p class="text-xs text-gray-500 uppercase tracking-wide">
                     {{ $quiz->module?->title ?? __('Module quiz') }}
@@ -26,7 +26,23 @@
                         {{ session('status') }}
                     </div>
                 @endif
-                <form action="{{ route('quizzes.submit', $quiz) }}" method="POST" class="space-y-6">
+                @if (!empty($attempt) && $attempt->expires_at)
+                    <div class="mb-4 flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                        <div>
+                            <p class="text-sm font-medium text-amber-800">{{ __('Time remaining') }}</p>
+                            <p class="text-xs text-amber-700">{{ __('The quiz submits automatically when the timer reaches zero.') }}</p>
+                        </div>
+                        <span id="quiz-timer-value" class="font-mono text-2xl font-semibold text-amber-900">--:--</span>
+                    </div>
+                @endif
+
+                @if (!empty($attempt) && $quiz->attempts_allowed > 0)
+                    <p class="mb-4 text-xs text-gray-500">
+                        {{ __('Attempt :n of :max', ['n' => $attempt->attempt_number, 'max' => $quiz->attempts_allowed]) }}
+                    </p>
+                @endif
+
+                <form id="quiz-form" action="{{ route('quizzes.submit', $quiz) }}" method="POST" class="space-y-6">
                     @csrf
                     @forelse ($quiz->questions as $question)
                         <div class="border border-gray-200 rounded-md p-4 space-y-3">
@@ -34,15 +50,28 @@
                                 {{ $loop->iteration }}. {{ $question->question }}
                                 <span class="text-xs text-gray-500">({{ $question->points }} {{ __('pts') }})</span>
                             </p>
-                            <div class="space-y-2">
-                                @foreach ($question->options as $option)
-                                    <label class="flex items-center gap-2 text-sm text-gray-700">
-                                        <input type="radio" name="answers[{{ $question->id }}]" value="{{ $option->id }}"
-                                            class="text-indigo-600 border-gray-300 focus:ring-indigo-500" />
-                                        <span>{{ $option->option_text }}</span>
-                                    </label>
-                                @endforeach
-                            </div>
+                            @if ($question->options->isNotEmpty())
+                                <div class="space-y-2">
+                                    @foreach ($question->options as $option)
+                                        <label class="flex items-center gap-2 text-sm text-gray-700">
+                                            <input type="radio" name="answers[{{ $question->id }}]" value="{{ $option->id }}"
+                                                class="text-indigo-600 border-gray-300 focus:ring-indigo-500" />
+                                            <span>{{ $option->option_text }}</span>
+                                        </label>
+                                    @endforeach
+                                </div>
+                            @else
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">{{ __('Your answer') }}</label>
+                                    <textarea name="text_answers[{{ $question->id }}]" rows="4"
+                                        class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                                        placeholder="{{ __('Type your answer here') }}">{{ old('text_answers.' . $question->id) }}</textarea>
+                                    <p class="text-xs text-gray-500 mt-1">{{ __('Written answers are graded by your instructor.') }}</p>
+                                    @error('text_answers.' . $question->id)
+                                        <p class="text-sm text-red-600 mt-1">{{ $message }}</p>
+                                    @enderror
+                                </div>
+                            @endif
                             @error('answers.' . $question->id)
                                 <p class="text-sm text-red-600">{{ $message }}</p>
                             @enderror
@@ -61,5 +90,35 @@
             </div>
         </div>
     </div>
+
+    @if (!empty($attempt) && $attempt->expires_at)
+        <script>
+            (function () {
+                let remaining = {{ (int) ($secondsRemaining ?? 0) }};
+                const display = document.getElementById('quiz-timer-value');
+                const form = document.getElementById('quiz-form');
+
+                function tick() {
+                    remaining = Math.max(0, remaining);
+                    if (display) {
+                        display.textContent =
+                            String(Math.floor(remaining / 60)).padStart(2, '0') + ':' +
+                            String(remaining % 60).padStart(2, '0');
+                    }
+                    if (remaining === 0) {
+                        if (form && !form.dataset.submitted) {
+                            form.dataset.submitted = '1';
+                            form.submit();
+                        }
+                        return;
+                    }
+                    remaining--;
+                }
+
+                tick();
+                setInterval(tick, 1000);
+            })();
+        </script>
+    @endif
 </x-app-layout>
 

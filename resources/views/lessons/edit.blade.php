@@ -54,7 +54,7 @@
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">
                                     {{ __('Video File (MP4)') }}
-                                    <span class="text-xs text-gray-500">(Max: 50MB)</span>
+                                    <span class="text-xs text-gray-500">(Max: 30MB — MP4, MOV, AVI, WMV)</span>
                                 </label>
                                 @if($lesson->video_path)
                                     <div class="mb-2 p-3 bg-gray-50 rounded-md flex items-center justify-between">

@@ -35,6 +35,7 @@ class QuizAttemptNotification extends Notification
             'score' => $this->attempt->score,
             'status' => $status,
             'type' => 'quiz_attempt',
+            'url' => route('quizzes.results', $this->attempt->quiz_id),
         ];
     }
 }

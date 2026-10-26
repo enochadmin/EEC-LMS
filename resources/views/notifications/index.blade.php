@@ -1,8 +1,18 @@
 <x-app-layout>
     <x-slot name="header">
-        <h2 class="font-semibold text-xl text-gray-800 leading-tight">
-            {{ __('Notifications') }}
-        </h2>
+        <div class="flex items-center justify-between">
+            <h2 class="font-semibold text-xl text-gray-800 leading-tight">
+                {{ __('Notifications') }}
+            </h2>
+            @if(auth()->user()->unreadNotifications()->count() > 0)
+                <form action="{{ route('notifications.read-all') }}" method="POST">
+                    @csrf
+                    <button type="submit" class="text-sm text-indigo-600 hover:text-indigo-800">
+                        {{ __('Mark all as read') }}
+                    </button>
+                </form>
+            @endif
+        </div>
     </x-slot>
 
     <div class="py-12">
@@ -28,33 +38,47 @@
                                     if ($type === 'module_completed' && isset($data['learner_id']) && $data['learner_id'] === $currentUser->id) {
                                         $message = "You completed the module '{$data['module_title']}'";
                                     }
-                                    if ($type === 'certificate_issued' && isset($data['module_title'])) {
-                                        // Already user-centric: "You have been issued..."
+                                    if (in_array($type, ['certificate_issued', 'lesson_approved', 'retake_response'], true) && isset($data['message'])) {
+                                        // Already user-centric: keep the stored wording.
                                         $message = $data['message'];
                                     }
-                                    if ($type === 'lesson_approved' && isset($data['lesson_title'])) {
-                                        $message = $data['message'];
-                                    }
-                                    if ($type === 'retake_response' && isset($data['item_title'])) {
-                                        $message = $data['message'];
-                                    }
-                                    // Requests/attempts/enrollments targeting managers keep learner names as-is
+
+                                    // Where a click should take the reader (null = not clickable).
+                                    $url = \App\Support\NotificationUrl::for($data, $currentUser);
                                 @endphp
                                 <div class="border-b pb-4 {{ $notification->read_at ? 'opacity-60' : '' }}">
-                                    <div class="flex justify-between items-start">
+                                    <div class="flex justify-between items-start gap-4">
                                         <div class="flex-1">
-                                            <p class="text-sm text-gray-900">
-                                                {{ $message }}
-                                            </p>
-                                            <p class="text-xs text-gray-500 mt-1">
-                                                {{ $notification->created_at->diffForHumans() }}
-                                            </p>
+                                            @if($url)
+                                                <a href="{{ route('notifications.open', $notification->id) }}" class="group block">
+                                                    <p class="text-sm text-gray-900 group-hover:text-indigo-700 flex items-start gap-2">
+                                                        @if(!$notification->read_at)
+                                                            <span class="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-indigo-500"></span>
+                                                        @endif
+                                                        <span>{{ $message }}</span>
+                                                    </p>
+                                                    <p class="text-xs text-gray-500 mt-1 ml-4">
+                                                        {{ $notification->created_at->diffForHumans() }}
+                                                        <span class="text-indigo-600 group-hover:underline ml-1">{{ __('View') }} &rarr;</span>
+                                                    </p>
+                                                </a>
+                                            @else
+                                                <p class="text-sm text-gray-900 flex items-start gap-2">
+                                                    @if(!$notification->read_at)
+                                                        <span class="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-indigo-500"></span>
+                                                    @endif
+                                                    <span>{{ $message }}</span>
+                                                </p>
+                                                <p class="text-xs text-gray-500 mt-1 ml-4">
+                                                    {{ $notification->created_at->diffForHumans() }}
+                                                </p>
+                                            @endif
                                         </div>
                                         @if(!$notification->read_at)
-                                            <form action="{{ route('notifications.read', $notification->id) }}" method="POST">
+                                            <form action="{{ route('notifications.read', $notification->id) }}" method="POST" class="flex-shrink-0">
                                                 @csrf
-                                                <button type="submit" class="text-xs text-indigo-600 hover:text-indigo-800 ml-4">
-                                                    Mark as read
+                                                <button type="submit" class="text-xs text-gray-500 hover:text-gray-700 ml-4">
+                                                    {{ __('Mark as read') }}
                                                 </button>
                                             </form>
                                         @endif

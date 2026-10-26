@@ -15,6 +15,17 @@ class QuizAttempt extends Model
         'score',
         'status',
         'attempt_number',
+        'started_at',
+        'expires_at',
+        'submitted_at',
+    ];
+
+    protected $casts = [
+        'score' => 'float',
+        'attempt_number' => 'integer',
+        'started_at' => 'datetime',
+        'expires_at' => 'datetime',
+        'submitted_at' => 'datetime',
     ];
 
     public function user()
@@ -25,5 +36,15 @@ class QuizAttempt extends Model
     public function quiz()
     {
         return $this->belongsTo(Quiz::class);
+    }
+
+    public function isOpen(): bool
+    {
+        return $this->submitted_at === null;
+    }
+
+    public function isExpired(): bool
+    {
+        return $this->expires_at !== null && $this->expires_at->isPast();
     }
 }

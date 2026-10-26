@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Category;
+use App\Models\Department;
 use App\Models\TrainingModule;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -29,6 +30,11 @@ class TrainingModuleController extends Controller
             });
         }
         
+        // Learners only see the courses assigned to them here; the rest of the
+        // catalogue lives on the Discover page.
+        if (auth()->check() && auth()->user()->hasRole('learner')) {
+            $query->whereIn('id', auth()->user()->assignedModules()->pluck('training_module_id'));
+        }
         $modules = $query->paginate(10)->appends(['search' => $search]);
 
         $myAssignments = auth()->check()
@@ -41,11 +47,26 @@ class TrainingModuleController extends Controller
         ]);
     }
 
+    /**
+     * Entry point for creating a module: the instructor picks a path first
+     * (manual builder vs. template), instead of being dropped straight into
+     * the long form.
+     */
     public function create()
     {
-        $categories = Category::orderBy('name')->pluck('name', 'id');
+        return view('modules.create-choice');
+    }
 
-        return view('modules.create', compact('categories'));
+    /**
+     * The original, fully manual builder — behaviour unchanged.
+     */
+    public function createManual()
+    {
+        $categories = Category::orderBy('name')->pluck('name', 'id');
+        $departments = Department::orderBy('name')->get();
+        $advisorOptions = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['instructor', 'instructor_manager']))->orderBy('name')->get(['id', 'name']);
+
+        return view('modules.create', compact('categories', 'departments', 'advisorOptions'));
     }
 
     public function store(Request $request)
@@ -53,6 +74,9 @@ class TrainingModuleController extends Controller
         $data = $request->validate([
             'title' => ['required', 'string', 'max:255'],
             'category_id' => ['required', 'exists:categories,id'],
+            'department_id' => ['nullable', 'exists:departments,id'],
+            'advisors' => ['nullable', 'array'],
+            'advisors.*' => ['integer', 'exists:users,id'],
             'description' => ['nullable', 'string'],
             'duration_minutes' => ['nullable', 'integer', 'min:1'],
             'status' => ['nullable', Rule::in(['draft', 'published', 'archived'])],
@@ -82,6 +106,13 @@ class TrainingModuleController extends Controller
         }
 
         $module = TrainingModule::create($data);
+        // Advisors are the people a learner can ask for help on this course.
+        if ($request->has('advisors')) {
+            $module->advisors()->syncWithPivotValues(
+                $request->input('advisors', []),
+                ['assigned_by' => $request->user()->id]
+            );
+        }
 
         return redirect()
             ->route('modules.show', $module)
@@ -90,23 +121,48 @@ class TrainingModuleController extends Controller
 
     public function show(TrainingModule $module)
     {
-        $module->load(['lessons', 'quizzes.questions', 'category', 'assignments.user']);
+        $module->load(['lessons', 'quizzes.questions', 'category', 'department', 'advisors', 'assignments.user']);
 
-        $assignableUsers = auth()->user()->can('assign modules')
-            ? User::orderBy('name')->get(['id', 'name'])
+        $user = auth()->user();
+
+        // Only learners can be enrolled. Admins and instructors are excluded.
+        $assignableUsers = $user->can('assign modules')
+            ? User::role('learner')->orderBy('name')->get(['id', 'name'])
             : collect();
+
+        // Learners need the module's own material (intro video, PDF, description)
+        // plus the review state of every lesson, so the page is the single place
+        // to consume the module instead of a table of contents.
+        $isEnrolled = $user->assignedModules()
+            ->where('training_module_id', $module->id)
+            ->exists();
+
+        $lessonCompletions = \App\Models\LessonCompletion::where('user_id', $user->id)
+            ->where('training_module_id', $module->id)
+            ->get()
+            ->keyBy('lesson_id');
+
+        $progress = $isEnrolled
+            ? app(\App\Services\ProgressService::class)->summary($user->id, $module->id)
+            : null;
 
         return view('modules.show', [
             'module' => $module,
             'assignableUsers' => $assignableUsers,
+            'isEnrolled' => $isEnrolled,
+            'lessonCompletions' => $lessonCompletions,
+            'progress' => $progress,
         ]);
     }
 
     public function edit(TrainingModule $module)
     {
         $categories = Category::orderBy('name')->pluck('name', 'id');
+        $departments = Department::orderBy('name')->get();
+        $advisorOptions = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['instructor', 'instructor_manager']))->orderBy('name')->get(['id', 'name']);
+        $selectedAdvisors = $module->advisors()->pluck('users.id')->all();
 
-        return view('modules.edit', compact('module', 'categories'));
+        return view('modules.edit', compact('module', 'categories', 'departments', 'advisorOptions', 'selectedAdvisors'));
     }
 
     public function update(Request $request, TrainingModule $module)
@@ -114,6 +170,9 @@ class TrainingModuleController extends Controller
         $data = $request->validate([
             'title' => ['required', 'string', 'max:255'],
             'category_id' => ['required', 'exists:categories,id'],
+            'department_id' => ['nullable', 'exists:departments,id'],
+            'advisors' => ['nullable', 'array'],
+            'advisors.*' => ['integer', 'exists:users,id'],
             'description' => ['nullable', 'string'],
             'duration_minutes' => ['nullable', 'integer', 'min:1'],
             'status' => ['required', Rule::in(['draft', 'published', 'archived'])],
@@ -162,6 +221,13 @@ class TrainingModuleController extends Controller
         }
 
         $module->update($data);
+        // Advisors are the people a learner can ask for help on this course.
+        if ($request->has('advisors')) {
+            $module->advisors()->syncWithPivotValues(
+                $request->input('advisors', []),
+                ['assigned_by' => $request->user()->id]
+            );
+        }
 
         return redirect()
             ->route('modules.show', $module)

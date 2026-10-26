@@ -56,6 +56,10 @@
                                         </td>
                                         <td class="px-4 py-2">
                                             <div class="flex items-center justify-end gap-2">
+                                                <a href="{{ route('certificates.view', $certificate) }}" target="_blank" rel="noopener"
+                                                    class="text-gray-900 hover:underline text-sm font-medium">
+                                                    {{ __('View') }}
+                                                </a>
                                                 <a href="{{ route('certificates.download', $certificate) }}"
                                                     class="text-indigo-600 hover:underline text-sm">
                                                     {{ __('Download') }}

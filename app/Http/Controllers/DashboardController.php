@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\AssignedModule;
 use App\Models\Certificate;
 use App\Models\KnowledgeFile;
+use App\Models\LearningTimeLog;
 use App\Models\Lesson;
+use App\Models\LessonCompletion;
 use App\Models\ModuleProgress;
 use App\Models\QuizAttempt;
 use App\Models\Quiz;
@@ -145,8 +147,9 @@ class DashboardController extends Controller
                     ->take(10)
                     ->get();
 
-                $adminStats['module_completions'] = DB::table('module_progress')
-                    ->where('percentage', 100)
+                $adminStats['module_completions'] = ModuleProgress::query()
+                    ->enrolledOnly()
+                    ->completed()
                     ->select('training_module_id', DB::raw('COUNT(*) as completion_count'))
                     ->groupBy('training_module_id')
                     ->get()
@@ -185,7 +188,8 @@ class DashboardController extends Controller
                     })
                     ->values();
 
-                $adminStats['module_progress_overview'] = DB::table('module_progress')
+                $adminStats['module_progress_overview'] = ModuleProgress::query()
+                    ->enrolledOnly()
                     ->select(
                         DB::raw('AVG(percentage) as avg_progress'),
                         DB::raw('COUNT(CASE WHEN percentage = 100 THEN 1 END) as completed'),
@@ -199,10 +203,11 @@ class DashboardController extends Controller
                     ->get()
                     ->map(function ($module) {
                         $completions = ModuleProgress::where('training_module_id', $module->id)
-                            ->where('percentage', 100)
+                            ->enrolledOnly()
+                            ->completed()
                             ->count();
                         $assignments = $module->assignments_count;
-                        $completion_rate = $assignments > 0 ? ($completions / $assignments) * 100 : 0;
+                        $completion_rate = $assignments > 0 ? min(100, ($completions / $assignments) * 100) : 0;
 
                         return [
                             'module_id' => $module->id,
@@ -258,8 +263,9 @@ class DashboardController extends Controller
                     ->take(10)
                     ->get();
 
-                $adminStats['module_completions'] = DB::table('module_progress')
-                    ->where('percentage', 100)
+                $adminStats['module_completions'] = ModuleProgress::query()
+                    ->enrolledOnly()
+                    ->completed()
                     ->whereIn('training_module_id', $managedModuleIdArray)
                     ->whereIn('user_id', $managedLearnerIdArray)
                     ->select('training_module_id', DB::raw('COUNT(*) as completion_count'))
@@ -327,10 +333,11 @@ class DashboardController extends Controller
                     ->map(function ($module) use ($managedLearnerIdArray) {
                         $completions = ModuleProgress::where('training_module_id', $module->id)
                             ->whereIn('user_id', $managedLearnerIdArray)
-                            ->where('percentage', 100)
+                            ->enrolledOnly()
+                            ->completed()
                             ->count();
                         $assignments = $module->instructor_assignments_count;
-                        $completion_rate = $assignments > 0 ? ($completions / $assignments) * 100 : 0;
+                        $completion_rate = $assignments > 0 ? min(100, ($completions / $assignments) * 100) : 0;
 
                         return [
                             'module_id' => $module->id,
@@ -418,15 +425,17 @@ class DashboardController extends Controller
             $relevantQuizIds = Quiz::pluck('id');
             $attempts = \App\Models\QuizAttempt::whereHas('user', function ($query) {
                 $query->role('learner');
-            })->whereIn('quiz_id', $relevantQuizIds)->get();
+            })->whereNotNull('submitted_at')->whereIn('quiz_id', $relevantQuizIds)->get();
         } elseif ($showReports && $isInstructor) {
             $relevantQuizIds = Quiz::whereIn('training_module_id', $managedModuleIdArray)->pluck('id');
             $attempts = \App\Models\QuizAttempt::whereIn('user_id', $managedLearnerIdArray)
+                ->whereNotNull('submitted_at')
                 ->whereIn('quiz_id', $relevantQuizIds)
                 ->get();
         } else {
             $relevantQuizIds = Quiz::whereIn('training_module_id', $learnerModuleIdArray)->pluck('id');
             $attempts = \App\Models\QuizAttempt::where('user_id', $user->id)
+                ->whereNotNull('submitted_at')
                 ->whereIn('quiz_id', $relevantQuizIds)
                 ->get();
         }
@@ -523,7 +532,7 @@ class DashboardController extends Controller
         $topLearnersQuarter = collect();
 
         if ($isRealAdmin || ($showReports && $isInstructor)) {
-            $baseQuizAttemptQuery = QuizAttempt::with(['user', 'quiz.module']);
+            $baseQuizAttemptQuery = QuizAttempt::with(['user', 'quiz.module'])->whereNotNull('submitted_at');
 
             if ($isRealAdmin) {
                 $learnerFilter = function ($q) {
@@ -579,6 +588,61 @@ class DashboardController extends Controller
             $topLearnersQuarter = $computeTopLearners('quarter');
         }
 
+        // ---- Continue learning ------------------------------------------------
+        // Resume point: the incomplete module the learner touched most recently,
+        // and the first lesson still waiting for them.
+        $resume = null;
+
+        if ($learnerModuleIds->isNotEmpty()) {
+            $incomplete = ModuleProgress::where('user_id', $user->id)
+                ->whereIn('training_module_id', $learnerModuleIdArray)
+                ->where('percentage', '<', 100)
+                ->get(['training_module_id', 'percentage', 'last_accessed_at']);
+
+            if ($incomplete->isNotEmpty()) {
+                $incompleteIds = $incomplete->pluck('training_module_id')->all();
+
+                $lastHeartbeat = LearningTimeLog::where('user_id', $user->id)
+                    ->whereIn('training_module_id', $incompleteIds)
+                    ->orderByDesc('updated_at')
+                    ->first();
+
+                $chosen = $incomplete->sortByDesc(function ($row) use ($lastHeartbeat) {
+                    $heartbeat = ($lastHeartbeat && (int) $lastHeartbeat->training_module_id === (int) $row->training_module_id)
+                        ? $lastHeartbeat->updated_at?->timestamp
+                        : null;
+
+                    $access = $row->last_accessed_at?->timestamp;
+
+                    return max($heartbeat ?? 0, $access ?? 0);
+                })->first();
+
+                $resumeModule = TrainingModule::find($chosen->training_module_id);
+
+                if ($resumeModule) {
+                    $moduleLessons = $resumeModule->lessons()->get(['id', 'title', 'estimated_minutes']);
+
+                    $approvedLessonIds = $moduleLessons->isEmpty()
+                        ? []
+                        : LessonCompletion::where('user_id', $user->id)
+                            ->whereIn('lesson_id', $moduleLessons->pluck('id'))
+                            ->where('status', 'approved')
+                            ->pluck('lesson_id')
+                            ->all();
+
+                    $remaining = $moduleLessons->reject(fn ($lesson) => in_array($lesson->id, $approvedLessonIds, true));
+
+                    $resume = [
+                        'module' => $resumeModule,
+                        'lesson' => $remaining->first(),
+                        'percentage' => round((float) $chosen->percentage, 1),
+                        'minutes_left' => (int) $remaining->sum('estimated_minutes'),
+                        'lessons_left' => $remaining->count(),
+                    ];
+                }
+            }
+        }
+
         return view('dashboard', [
             'stats' => $stats,
             'userStats' => $userStats,
@@ -594,6 +658,7 @@ class DashboardController extends Controller
             'showReports' => $showReports,
             'topLearnersMonth' => $topLearnersMonth,
             'topLearnersQuarter' => $topLearnersQuarter,
+            'resume' => $resume,
         ]);
     }
 }

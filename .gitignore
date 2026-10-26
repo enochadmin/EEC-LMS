@@ -22,3 +22,15 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Session / tooling artefacts — never part of the application
+/cdp-*
+/edge-*
+/pip-*
+/node-compile-cache
+/preview-shots
+/_*.html
+/_*.cjs
+/patch_*.php
+/smoke.php
+*.tmp

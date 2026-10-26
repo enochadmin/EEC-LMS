@@ -29,8 +29,12 @@
                                         {{ $certificate->valid_until?->format('M d, Y') ?? __('Lifetime') }}
                                     </td>
                                     <td class="px-4 py-2 text-right">
+                                        <a href="{{ route('certificates.view', $certificate) }}" target="_blank" rel="noopener"
+                                            class="inline-flex items-center px-3 py-1.5 border border-gray-900 rounded-md text-sm text-white bg-gray-900 hover:bg-gray-700">
+                                            {{ __('View') }}
+                                        </a>
                                         <a href="{{ route('certificates.download', $certificate) }}"
-                                            class="inline-flex items-center px-3 py-1.5 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50">
+                                            class="ml-2 inline-flex items-center px-3 py-1.5 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50">
                                             {{ __('Download PDF') }}
                                         </a>
                                     </td>

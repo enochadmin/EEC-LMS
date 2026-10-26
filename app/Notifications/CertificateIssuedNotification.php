@@ -30,6 +30,7 @@ class CertificateIssuedNotification extends Notification
             'module_id' => $this->certificate->training_module_id,
             'module_title' => $this->certificate->module->title,
             'type' => 'certificate_issued',
+            'url' => route('certificates.index'),
         ];
     }
 }

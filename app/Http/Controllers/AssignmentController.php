@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AssignedModule;
 use App\Models\TrainingModule;
+use App\Models\User;
 use Illuminate\Http\Request;
 
 class AssignmentController extends Controller
@@ -52,23 +53,16 @@ class AssignmentController extends Controller
             ]
         );
 
-        // Initialize progress if not exists
-        \App\Models\ModuleProgress::updateOrCreate(
-            [
-                'training_module_id' => $module->id,
-                'user_id' => $data['user_id'],
-            ],
-            [
-                'completed_lessons' => 0,
-                'total_lessons' => $module->lessons()->count(),
-                'percentage' => 0,
-            ]
-        );
+        // Initialise progress from the module's task list.
+        app(\App\Services\ProgressService::class)->recalculate($assignment->user_id, $module->id);
 
-        // Notify instructor about enrollment
-        $notifiable = $assignment->assigner ?? $module->creator;
-        if ($notifiable && $assignment->wasRecentlyCreated) {
-            $notifiable->notify(new \App\Notifications\UserEnrolledNotification($assignment));
+        // Tell the learner they were enrolled.
+        if ($assignment->wasRecentlyCreated) {
+            $assignment->user->notify(new \App\Notifications\WorkflowNotification(
+                type: 'enrollment',
+                message: "You were enrolled in '{$module->title}'.",
+                url: route('modules.show', $module),
+            ));
         }
 
         return redirect()

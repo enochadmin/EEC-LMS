@@ -15,6 +15,14 @@ class LessonCompletion extends Model
         'user_id',
         'training_module_id',
         'lesson_id',
+        'status',
+        'rejection_reason',
+        'reviewed_by',
+        'reviewed_at',
+    ];
+
+    protected $casts = [
+        'reviewed_at' => 'datetime',
     ];
 
     public function lesson()
@@ -30,5 +38,10 @@ class LessonCompletion extends Model
     public function module()
     {
         return $this->belongsTo(TrainingModule::class, 'training_module_id');
+    }
+
+    public function reviewer()
+    {
+        return $this->belongsTo(User::class, 'reviewed_by');
     }
 }

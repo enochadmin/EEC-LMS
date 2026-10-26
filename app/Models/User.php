@@ -26,6 +26,13 @@ class User extends Authenticatable
         'email',
         'password',
         'department_id',
+        'job_title',
+        'phone',
+        'office_location',
+        'employment_type',
+        'hire_date',
+        'manager_id',
+        'signature_path',
     ];
 
     /**
@@ -48,11 +55,15 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'hire_date' => 'date',
         ];
     }
 
     public function assignedModules(){ return $this->hasMany(AssignedModule::class); }
     public function department(){ return $this->belongsTo(Department::class); }
+    public function manager(){ return $this->belongsTo(User::class, 'manager_id'); }
+    public function directReports(){ return $this->hasMany(User::class, 'manager_id'); }
+    public function advisedModules(){ return $this->belongsToMany(TrainingModule::class, 'module_advisors')->withPivot('assigned_by')->withTimestamps(); }
     public function progress(){ return $this->hasMany(ModuleProgress::class); }
     public function certificates(){ return $this->hasMany(Certificate::class); }
     public function knowledgeFiles(){ return $this->hasMany(KnowledgeFile::class); }

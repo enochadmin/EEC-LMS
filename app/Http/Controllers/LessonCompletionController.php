@@ -3,114 +3,175 @@
 namespace App\Http\Controllers;
 
 use App\Models\LessonCompletion;
+use App\Models\ModuleCompletionApproval;
+use App\Notifications\ModuleCompletionApprovalRequestNotification;
+use App\Notifications\WorkflowNotification;
+use App\Services\ProgressService;
 use Illuminate\Http\Request;
 
 class LessonCompletionController extends Controller
 {
     public function __construct()
     {
-        $this->middleware('permission:manage users|manage modules');
+        // Anyone who can review a module can review its lesson submissions.
+        $this->middleware('permission:manage users|manage modules|assign modules|issue certificates');
     }
 
-    public function approve(LessonCompletion $completion)
+    /**
+     * Dedicated review queue for lesson completions.
+     *
+     * This used to sit inside the retake requests page. The two queues mean
+     * different things (a retake hands work back, an approval signs it off),
+     * so lesson approvals now have their own page.
+     */
+    public function index(Request $request)
     {
-        $completion->update(['status' => 'approved']);
+        $search = trim((string) $request->get('search'));
 
-        // Recalculate progress
-        $module = $completion->module;
-        $user = $completion->user;
+        $status = (string) $request->get('status', 'pending');
+        if (! in_array($status, ['pending', 'approved', 'rejected', 'all'], true)) {
+            $status = 'pending';
+        }
 
-        $completedCount = LessonCompletion::where('training_module_id', $module->id)
-            ->where('user_id', $user->id)
-            ->where('status', 'approved')
-            ->count();
+        $query = LessonCompletion::with(['user', 'lesson', 'module', 'reviewer'])
+            ->when($status !== 'all', fn ($q) => $q->where('status', $status))
+            ->when($search !== '', function ($q) use ($search) {
+                $q->where(function ($sub) use ($search) {
+                    $sub->whereHas('user', function ($u) use ($search) {
+                        $u->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%");
+                    })
+                        ->orWhereHas('lesson', fn ($l) => $l->where('title', 'like', "%{$search}%"))
+                        ->orWhereHas('module', fn ($m) => $m->where('title', 'like', "%{$search}%"));
+                });
+            })
+            ->orderByDesc('created_at');
 
-        $totalLessons = $module->lessons()->count();
-
-        // Lessons contribute 50% of total module score
-        $lessonPortion = 50;
-        $lessonPercentage = $totalLessons > 0 ? ($completedCount / $totalLessons) * $lessonPortion : 0;
-
-        $progress = \App\Models\ModuleProgress::firstOrNew([
-                'training_module_id' => $module->id,
-                'user_id' => $user->id,
+        $completions = $query->paginate(20)->appends([
+            'search' => $search,
+            'status' => $status,
         ]);
 
-        $progress->completed_lessons = $completedCount;
-        $progress->total_lessons = $totalLessons;
-        $progress->lesson_percentage = $lessonPercentage;
-        $progress->quiz_percentage = $progress->quiz_percentage ?? 0;
-        $progress->percentage = round(($progress->lesson_percentage ?? 0) + ($progress->quiz_percentage ?? 0), 1);
-        $progress->last_accessed_at = now();
-        $progress->save();
+        $counts = [
+            'pending' => LessonCompletion::where('status', 'pending')->count(),
+            'approved' => LessonCompletion::where('status', 'approved')->count(),
+            'rejected' => LessonCompletion::where('status', 'rejected')->count(),
+        ];
 
-        // Notify learner about approval
-        $completion->user->notify(new \App\Notifications\LessonApprovedNotification($completion));
-
-        // Check if all lessons in the module are completed (approved)
-        $module = $completion->module;
-        $totalLessons = $module->lessons()->count();
-        $completedLessons = \App\Models\LessonCompletion::where('training_module_id', $module->id)
-            ->where('user_id', $completion->user_id)
-            ->where('status', 'approved')
-            ->count();
-
-        if ($totalLessons > 0 && $totalLessons === $completedLessons) {
-            // Ensure quizzes (if any) are passed before creating a module completion approval request
-            $quizIds = $module->quizzes()->pluck('id');
-            $hasQuiz = $quizIds->isNotEmpty();
-            $hasPassedQuiz = false;
-
-            if ($hasQuiz) {
-                $hasPassedQuiz = \App\Models\QuizAttempt::where('user_id', $completion->user_id)
-                    ->whereIn('quiz_id', $quizIds)
-                    ->where('status', 'passed')
-                    ->exists();
-            }
-
-            if (! $hasQuiz || $hasPassedQuiz) {
-                // Create a pending module completion approval if not already present
-                $approval = \App\Models\ModuleCompletionApproval::firstOrCreate(
-                    [
-                        'training_module_id' => $module->id,
-                        'user_id' => $completion->user_id,
-                    ],
-                    [
-                        'status' => 'pending',
-                    ]
-                );
-
-                if ($approval->wasRecentlyCreated) {
-                    // Notify instructor / manager about module completion approval request
-                    $assignment = \App\Models\AssignedModule::where('training_module_id', $module->id)
-                        ->where('user_id', $completion->user_id)
-                        ->with('assigner')
-                        ->first();
-
-                    $notifiable = $assignment?->assigner ?? $module->creator;
-                    if ($notifiable) {
-                        $notifiable->notify(new \App\Notifications\ModuleCompletionApprovalRequestNotification($module, $completion->user));
-                    }
-                }
-            }
-        }
-
-        if (request()->wantsJson() || request()->ajax()) {
-            return response()->json([
-                'status' => 'Lesson completion approved.',
-                'module_id' => $module->id,
-                'percentage' => $progress->percentage ?? null,
-            ]);
-        }
-
-        return redirect()->back()->with('status', 'Lesson completion approved.');
+        return view('lesson_approvals.index', compact('completions', 'counts', 'status', 'search'));
     }
 
-    public function reject(LessonCompletion $completion)
+    /**
+     * Approve a lesson completion. Progress is recalculated from tasks, never
+     * from a fixed lesson/quiz split.
+     */
+    public function approve(Request $request, LessonCompletion $completion)
     {
-        // Delete the completion record so user can try again
-        $completion->delete();
+        if ($completion->status === 'approved') {
+            return $this->respond($request, 'This lesson is already approved.');
+        }
 
-        return redirect()->back()->with('status', 'Lesson completion rejected.');
+        $completion->update([
+            'status' => 'approved',
+            'rejection_reason' => null,
+            'reviewed_by' => $request->user()->id,
+            'reviewed_at' => now(),
+        ]);
+
+        $progress = app(ProgressService::class)
+            ->recalculate($completion->user_id, $completion->training_module_id);
+
+        $completion->user->notify(new WorkflowNotification(
+            type: 'lesson_approved',
+            message: "Your completion of '{$completion->lesson->title}' was approved.",
+            url: route('modules.lessons.show', [$completion->module, $completion->lesson]),
+        ));
+
+        // When every task is done, open the module completion review automatically.
+        $this->openModuleReviewIfComplete($completion, $progress);
+
+        return $this->respond($request, 'Lesson completion approved.', [
+            'module_id' => $completion->training_module_id,
+            'percentage' => $progress->percentage,
+        ]);
+    }
+
+    /**
+     * Reject a lesson completion. The row is kept (with the reason) so the
+     * learner can see why and resubmit.
+     */
+    public function reject(Request $request, LessonCompletion $completion)
+    {
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ], [
+            'reason.required' => 'Please give the learner a reason for the rejection.',
+        ]);
+
+        $completion->update([
+            'status' => 'rejected',
+            'rejection_reason' => $data['reason'],
+            'reviewed_by' => $request->user()->id,
+            'reviewed_at' => now(),
+        ]);
+
+        // Progress drops back if the lesson had already been counted.
+        app(ProgressService::class)
+            ->recalculate($completion->user_id, $completion->training_module_id);
+
+        $completion->user->notify(new WorkflowNotification(
+            type: 'lesson_rejected',
+            message: "Your completion of '{$completion->lesson->title}' was sent back: {$data['reason']}",
+            url: route('modules.lessons.show', [$completion->module, $completion->lesson]),
+        ));
+
+        return $this->respond($request, 'Lesson completion rejected. The learner has been notified.');
+    }
+
+    /**
+     * Create (or reopen) the module completion review once all tasks are done.
+     */
+    protected function openModuleReviewIfComplete(LessonCompletion $completion, $progress): void
+    {
+        if (! $progress || (float) $progress->percentage < 100) {
+            return;
+        }
+
+        $module = $completion->module;
+
+        $approval = ModuleCompletionApproval::firstOrNew([
+            'training_module_id' => $module->id,
+            'user_id' => $completion->user_id,
+        ]);
+
+        if ($approval->exists && in_array($approval->status, ['pending', 'approved'], true)) {
+            return;
+        }
+
+        $approval->status = 'pending';
+        $approval->approved_by = null;
+        $approval->approved_at = null;
+        $approval->notes = null;
+        $approval->save();
+
+        $assignment = \App\Models\AssignedModule::where('training_module_id', $module->id)
+            ->where('user_id', $completion->user_id)
+            ->with('assigner')
+            ->first();
+
+        $reviewer = $assignment?->assigner ?? $module->creator;
+
+        if ($reviewer) {
+            $reviewer->notify(new ModuleCompletionApprovalRequestNotification($module, $completion->user));
+        }
+    }
+
+    protected function respond(Request $request, string $message, array $extra = [])
+    {
+        if ($request->wantsJson() || $request->ajax()) {
+            return response()->json(array_merge(['status' => $message], $extra));
+        }
+
+        return redirect()->back()->with('status', $message);
     }
 }

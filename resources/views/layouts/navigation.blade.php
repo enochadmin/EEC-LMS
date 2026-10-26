@@ -104,14 +104,25 @@
                                         $message = "Your completion request for '{$data['module_title']}' has been submitted";
                                     }
                                 @endphp
-                                <div class="px-4 py-3 hover:bg-gray-50 border-b">
-                                    <p class="text-sm text-gray-900">{{ $message }}</p>
-                                    <p class="text-xs text-gray-500 mt-1">{{ $notification->created_at->diffForHumans() }}</p>
-                                    <form action="{{ route('notifications.read', $notification->id) }}" method="POST" class="mt-1">
-                                        @csrf
-                                        <button type="submit" class="text-xs text-indigo-600 hover:text-indigo-800">Mark as read</button>
-                                    </form>
-                                </div>
+                                @php $notificationUrl = \App\Support\NotificationUrl::for($data, $currentUser); @endphp
+                                @if($notificationUrl)
+                                    <a href="{{ route('notifications.open', $notification->id) }}" class="block px-4 py-3 hover:bg-gray-50 border-b">
+                                        <p class="text-sm text-gray-900">{{ $message }}</p>
+                                        <p class="text-xs text-gray-500 mt-1">
+                                            {{ $notification->created_at->diffForHumans() }}
+                                            <span class="text-indigo-600 ml-1">{{ __('View') }} &rarr;</span>
+                                        </p>
+                                    </a>
+                                @else
+                                    <div class="px-4 py-3 hover:bg-gray-50 border-b">
+                                        <p class="text-sm text-gray-900">{{ $message }}</p>
+                                        <p class="text-xs text-gray-500 mt-1">{{ $notification->created_at->diffForHumans() }}</p>
+                                        <form action="{{ route('notifications.read', $notification->id) }}" method="POST" class="mt-1">
+                                            @csrf
+                                            <button type="submit" class="text-xs text-indigo-600 hover:text-indigo-800">Mark as read</button>
+                                        </form>
+                                    </div>
+                                @endif
                             @empty
                                 <div class="px-4 py-3 text-sm text-gray-500 text-center">
                                     No new notifications

@@ -19,6 +19,23 @@ class NotificationController extends Controller
         return view('notifications.index', compact('notifications'));
     }
 
+    /**
+     * Open a notification: mark it read, then send the reader to whatever the
+     * notification is about (a lesson, an approval queue, a certificate...).
+     */
+    public function open($id)
+    {
+        $notification = auth()->user()
+            ->notifications()
+            ->findOrFail($id);
+
+        $notification->markAsRead();
+
+        $url = \App\Support\NotificationUrl::for($notification->data, auth()->user());
+
+        return redirect()->to($url ?? route('notifications.index'));
+    }
+
     public function markAsRead($id)
     {
         $notification = auth()->user()

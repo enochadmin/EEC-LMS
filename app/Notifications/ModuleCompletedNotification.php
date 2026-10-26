@@ -34,6 +34,7 @@ class ModuleCompletedNotification extends Notification
             'learner_name' => $this->learner->name,
             'module_title' => $this->module->title,
             'type' => 'module_completed',
+            'url' => route('modules.show', $this->module),
         ];
     }
 }

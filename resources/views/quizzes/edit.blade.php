@@ -1,6 +1,6 @@
 <x-app-layout>
     <x-slot name="header">
-        <div class="flex items-center justify-between">
+        <div class="flex w-full items-center justify-between gap-3">
             <div>
                 <p class="text-xs text-gray-500 uppercase tracking-wide">
                     {{ $quiz->module?->title ?? __('Unassigned Module') }}
@@ -41,6 +41,51 @@
                         @enderror
                     </div>
 
+                    <div class="border-t border-gray-100 pt-5">
+                        <h3 class="text-sm font-semibold text-gray-900">{{ __('Assessment rules') }}</h3>
+                        <p class="text-xs text-gray-500 mt-1">{{ __('All optional. Leave blank for an untimed quiz with unlimited attempts.') }}</p>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">{{ __('Time limit (minutes)') }}</label>
+                                <input type="number" name="time_limit_minutes" min="1" max="600"
+                                    value="{{ old('time_limit_minutes', $quiz->time_limit_minutes) }}" placeholder="{{ __('No limit') }}"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                @error('time_limit_minutes')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">{{ __('Attempts allowed') }}</label>
+                                <input type="number" name="attempts_allowed" min="0" max="100"
+                                    value="{{ old('attempts_allowed', $quiz->attempts_allowed ?? 0) }}"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                <p class="text-xs text-gray-500 mt-1">{{ __('0 = unlimited') }}</p>
+                                @error('attempts_allowed')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">{{ __('Cooldown after a fail (minutes)') }}</label>
+                                <input type="number" name="cooldown_minutes" min="0" max="10080"
+                                    value="{{ old('cooldown_minutes', $quiz->cooldown_minutes ?? 0) }}"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                                <p class="text-xs text-gray-500 mt-1">{{ __('0 = retake immediately') }}</p>
+                                @error('cooldown_minutes')<p class="text-sm text-red-600 mt-1">{{ $message }}</p>@enderror
+                            </div>
+                        </div>
+
+                        <div class="mt-4 space-y-2">
+                            <input type="hidden" name="shuffle_questions" value="0" />
+                            <label class="flex items-center gap-2 text-sm text-gray-700">
+                                <input type="checkbox" name="shuffle_questions" value="1" class="rounded border-gray-300 text-indigo-600"
+                                    {{ old('shuffle_questions', $quiz->shuffle_questions) ? 'checked' : '' }} />
+                                {{ __('Shuffle question order for each attempt') }}
+                            </label>
+                            <input type="hidden" name="shuffle_options" value="0" />
+                            <label class="flex items-center gap-2 text-sm text-gray-700">
+                                <input type="checkbox" name="shuffle_options" value="1" class="rounded border-gray-300 text-indigo-600"
+                                    {{ old('shuffle_options', $quiz->shuffle_options) ? 'checked' : '' }} />
+                                {{ __('Shuffle answer options for each attempt') }}
+                            </label>
+                        </div>
+                    </div>
                     <div class="flex items-center justify-end gap-3">
                         <button type="submit"
                             class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-500">

@@ -12,6 +12,7 @@ class TrainingModule extends Model
     protected $fillable = [
         'title',
         'category_id',
+        'department_id',
         'description',
         'duration_minutes',
         'created_by',
@@ -24,6 +25,11 @@ class TrainingModule extends Model
     public function category()
     {
         return $this->belongsTo(Category::class);
+    }
+
+    public function department()
+    {
+        return $this->belongsTo(Department::class);
     }
 
     public function lessons()
@@ -44,5 +50,25 @@ class TrainingModule extends Model
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * Instructors a learner can turn to for this course. Any number per module;
+     * `assigned_by` records who put them there (self, or an instructor manager).
+     */
+    public function advisors()
+    {
+        return $this->belongsToMany(User::class, 'module_advisors')
+            ->withPivot('assigned_by')
+            ->withTimestamps();
+    }
+
+    /**
+     * The department a report should attribute this course to: its own
+     * department, falling back to the creator's for older courses.
+     */
+    public function getReportingDepartmentAttribute(): ?Department
+    {
+        return $this->department ?? $this->creator?->department;
     }
 }

@@ -35,6 +35,39 @@
                             <p class="text-sm text-red-600 mt-1">{{ $message }}</p>
                         @enderror
                     </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">{{ __('Department') }}</label>
+                            <select name="department_id"
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                                <option value="">{{ __('No department') }}</option>
+                                @foreach ($departments as $department)
+                                    <option value="{{ $department->id }}" @selected(old('department_id', null) == $department->id)>
+                                        {{ $department->name }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            <p class="text-xs text-gray-500 mt-1">{{ __('Used for department reporting. Optional.') }}</p>
+                            @error('department_id')
+                                <p class="text-sm text-red-600 mt-1">{{ $message }}</p>
+                            @enderror
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">{{ __('Advisors') }}</label>
+                            <select name="advisors[]" multiple size="4"
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                                @foreach ($advisorOptions as $advisor)
+                                    <option value="{{ $advisor->id }}" @selected(in_array($advisor->id, (array) old('advisors', [])))>
+                                        {{ $advisor->name }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            <p class="text-xs text-gray-500 mt-1">{{ __('Instructors learners can contact for help. Hold Ctrl/Cmd to pick several.') }}</p>
+                            @error('advisors')
+                                <p class="text-sm text-red-600 mt-1">{{ $message }}</p>
+                            @enderror
+                        </div>
+                    </div>
 
                     <div>
                         <label class="block text-sm font-medium text-gray-700">{{ __('Description') }}</label>

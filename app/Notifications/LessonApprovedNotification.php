@@ -31,6 +31,7 @@ class LessonApprovedNotification extends Notification
             'lesson_title' => $this->completion->lesson->title,
             'module_title' => $this->completion->module->title,
             'type' => 'lesson_approved',
+            'url' => route('modules.lessons.show', [$this->completion->module, $this->completion->lesson]),
         ];
     }
 }

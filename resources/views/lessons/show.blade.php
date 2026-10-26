@@ -23,6 +23,23 @@
     <div class="py-8">
         <div class="max-w-4xl mx-auto sm:px-6 lg:px-8 space-y-6">
             <div class="bg-white shadow-sm sm:rounded-lg p-6 space-y-4">
+                @if(isset($completion) && $completion && $completion->status === 'approved')
+                    <div class="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded text-sm">
+                        <span class="font-medium">{{ __('Approved') }}</span>
+                        @if($completion->reviewed_at)
+                            {{ __('on :date by your instructor.', ['date' => $completion->reviewed_at->format('M d, Y')]) }}
+                        @else
+                            {{ __('by your instructor.') }}
+                        @endif
+                    </div>
+                @elseif(isset($completion) && $completion && $completion->status === 'rejected')
+                    <div class="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded text-sm space-y-1">
+                        <p class="font-medium">{{ __('Your completion was sent back.') }}</p>
+                        <p>{{ $completion->rejection_reason }}</p>
+                        <p class="text-xs text-red-700">{{ __('Address the note above, then submit the lesson again.') }}</p>
+                    </div>
+                @endif
+
                 <div class="flex items-center gap-4 text-sm text-gray-500">
                     <span>{{ __('Order #:order', ['order' => $lesson->order]) }}</span>
                     <span>•</span>
@@ -111,11 +128,11 @@
                 <a href="{{ route('modules.show', $module) }}" class="text-gray-600 hover:underline">
                     {{ __('Back to module') }}
                 </a>
-                @if(auth()->check() && auth()->user()->hasRole('learner'))
+                @if(auth()->check() && auth()->user()->hasRole('learner') && (!isset($completion) || !$completion || $completion->status !== 'approved'))
                     <form action="{{ route('modules.lessons.complete', ['module' => $module, 'lesson' => $lesson]) }}" method="POST" onsubmit="return confirm('Are you sure you want to mark this lesson completed? This will request approval from your instructor.');">
                         @csrf
                         <button type="submit" class="ml-4 inline-flex items-center px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-500">
-                            {{ __('Mark as completed') }}
+                            {{ isset($completion) && $completion && $completion->status === 'rejected' ? __('Resubmit for approval') : __('Mark as completed') }}
                         </button>
                     </form>
                 @endif
@@ -130,5 +147,6 @@
             </div>
         </div>
     </div>
+    <x-time-tracker :module-id="$module->id" :lesson-id="$lesson->id" />
 </x-app-layout>
 

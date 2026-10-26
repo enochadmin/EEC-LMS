@@ -1,4 +1,10 @@
 @props(['user'])
+@php
+    $pendingApprovals = 0;
+    if ($user && ($user->hasRole('admin') || $user->can('assign modules') || $user->can('issue certificates'))) {
+        $pendingApprovals = \App\Models\ModuleCompletionApproval::where('status', 'pending')->count();
+    }
+@endphp
 
 <aside x-data="{ 
         open: true,
@@ -36,6 +42,15 @@
                 Dashboard
             </a>
 
+            @if(auth()->user()->hasRole('admin') || auth()->user()->hasRole('instructor'))
+            <!-- Reports -->
+            <a href="{{ route('reports.index') }}" class="flex items-center px-4 py-3 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors {{ request()->routeIs('reports.*') ? 'bg-gray-800 text-white' : '' }}">
+                <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                </svg>
+                Reports
+            </a>
+            @endif
             <!-- Training Modules -->
             <a href="{{ route('modules.index') }}" class="flex items-center px-4 py-3 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors {{ request()->routeIs('modules.*') ? 'bg-gray-800 text-white' : '' }}">
                 <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -43,6 +58,14 @@
                 </svg>
                 Modules
             </a>
+            @if(auth()->user()->hasRole('learner'))
+            <a href="{{ route('discover.index') }}" class="flex items-center px-4 py-3 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors {{ request()->routeIs('discover.*') ? 'bg-gray-800 text-white' : '' }}">
+                <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"></path>
+                </svg>
+                Discover
+            </a>
+            @endif
 
             @can('manage lessons')
             <!-- Lessons -->
@@ -130,11 +153,27 @@
                             Manage Categories
                         </a>
                     @endif
+
+                    @if(auth()->user()->hasRole('admin'))
+                        <a href="{{ route('admin.branding.index') }}" class="flex items-center px-4 py-2 text-sm text-gray-300 rounded-md hover:bg-gray-800 {{ request()->routeIs('admin.branding.*') ? 'bg-gray-800 text-white' : '' }}">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 012.828 2.828L11.828 15.83a2 2 0 01-1.414.586H8v-2.414A2 2 0 018.586 12.6z"></path></svg>
+                            Certificate Branding
+                        </a>
+                        <a href="{{ route('admin.activity.index') }}" class="flex items-center px-4 py-2 text-sm text-gray-300 rounded-md hover:bg-gray-800 {{ request()->routeIs('admin.activity.*') ? 'bg-gray-800 text-white' : '' }}">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                            Activity Log
+                        </a>
+                        <a href="{{ route('roles.index') }}" class="flex items-center px-4 py-2 text-sm text-gray-300 rounded-md hover:bg-gray-800 {{ request()->routeIs('roles.*') ? 'bg-gray-800 text-white' : '' }}">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                            Roles &amp; Permissions
+                        </a>
+                    @endif
                 </div>
             </div>
             @endunlessrole
 
-            @role('learner')
+            @if(auth()->user()->assignedModules()->exists() || \App\Models\EnrollmentRequest::where('user_id', auth()->id())->where('status', 'pending')->exists())
+
             <!-- Learner Section -->
             <div class="pt-4">
                 <p class="px-4 text-xs font-semibold text-gray-400 uppercase">My Learning</p>
@@ -151,20 +190,23 @@
                 </svg>
                 My Progress
             </a>
-            @endrole
+            @endif
 
             @canany(['assign modules','issue certificates','manage users'])
             <!-- Approvals for instructors/managers -->
             <div class="pt-4">
                 <p class="px-4 text-xs font-semibold text-gray-400 uppercase">Approvers</p>
             </div>
-            <div x-data="{ openApprovals: false }">
+            <div x-data="{ openApprovals: {{ $pendingApprovals > 0 ? 'true' : 'false' }} }">
                 <button @click="openApprovals = !openApprovals" class="w-full flex items-center justify-between px-4 py-3 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors">
                     <span class="flex items-center">
                         <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                         </svg>
                         Approvers
+                        @if($pendingApprovals > 0)
+                            <span class="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold rounded-full bg-red-500 text-white">{{ $pendingApprovals }}</span>
+                        @endif
                     </span>
                     <svg x-show="!openApprovals" class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
@@ -185,6 +227,22 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                         </svg>
                         Module Approvals
+                        @if($pendingApprovals > 0)
+                            <span class="ml-auto inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold rounded-full bg-red-500 text-white">{{ $pendingApprovals }}</span>
+                        @endif                    </a>
+                    <a href="{{ route('lesson-approvals.index') }}" class="flex items-center justify-between px-4 py-2 text-sm text-gray-300 rounded-md hover:bg-gray-800 {{ request()->routeIs('lesson-approvals.*') ? 'bg-gray-800 text-white' : '' }}">
+                        <span class="flex items-center">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            Lesson Approvals
+                        </span>
+                        @php $pendingLessonApprovals = \App\Models\LessonCompletion::where('status', 'pending')->count(); @endphp
+                        @if($pendingLessonApprovals > 0)
+                            <span class="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-semibold rounded-full bg-yellow-500 text-gray-900">
+                                {{ $pendingLessonApprovals }}
+                            </span>
+                        @endif
                     </a>
                     <a href="{{ route('retake-requests.index') }}" class="flex items-center px-4 py-2 text-sm text-gray-300 rounded-md hover:bg-gray-800 {{ request()->routeIs('retake-requests.*') ? 'bg-gray-800 text-white' : '' }}">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">

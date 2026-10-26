@@ -83,12 +83,9 @@ class RetakeRequestController extends Controller
         
         $requests = $query->paginate(20)->appends(['search' => $search]);
 
-        $completionRequests = \App\Models\LessonCompletion::with(['user', 'lesson', 'module'])
-            ->where('status', 'pending')
-            ->latest()
-            ->get();
-
-        return view('retake_requests.index', compact('requests', 'completionRequests'));
+        // Lesson completions are reviewed on their own page (lesson-approvals),
+        // not in this retake queue.
+        return view('retake_requests.index', compact('requests'));
     }
 
     /**
@@ -114,6 +111,16 @@ class RetakeRequestController extends Controller
         if ($data['status'] === 'approved') {
             // Reset the progress/completion for the item
             $this->resetProgress($retakeRequest);
+
+            // Rebuild progress from whatever is still completed.
+            $item = $retakeRequest->requestable;
+            $moduleId = $item instanceof \App\Models\TrainingModule
+                ? $item->id
+                : ($item?->module?->id);
+
+            if ($moduleId) {
+                app(\App\Services\ProgressService::class)->recalculate($retakeRequest->user_id, $moduleId);
+            }
         }
 
         // Notify learner about response

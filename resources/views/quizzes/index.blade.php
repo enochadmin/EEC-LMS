@@ -1,6 +1,6 @@
 <x-app-layout>
     <x-slot name="header">
-        <div class="flex items-center justify-between">
+        <div class="flex w-full items-center justify-between gap-3">
             <h2 class="font-semibold text-xl text-gray-800 leading-tight">
                 {{ __('Quizzes') }}
             </h2>

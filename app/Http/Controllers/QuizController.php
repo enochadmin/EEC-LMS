@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Quiz;
+use App\Services\QuizAttemptService;
 use Illuminate\Support\Facades\Schema;
 use App\Models\TrainingModule;
 use App\Models\UserAnswer;
@@ -62,7 +63,17 @@ class QuizController extends Controller
         $data = $request->validate([
             'title' => ['required', 'string', 'max:255'],
             'passing_score' => ['required', 'integer', 'min:1', 'max:100'],
+            'time_limit_minutes' => ['nullable', 'integer', 'min:1', 'max:600'],
+            'attempts_allowed' => ['nullable', 'integer', 'min:0', 'max:100'],
+            'cooldown_minutes' => ['nullable', 'integer', 'min:0', 'max:10080'],
+            'shuffle_questions' => ['nullable', 'boolean'],
+            'shuffle_options' => ['nullable', 'boolean'],
         ]);
+
+        $data['attempts_allowed'] = $data['attempts_allowed'] ?? 0;
+        $data['cooldown_minutes'] = $data['cooldown_minutes'] ?? 0;
+        $data['shuffle_questions'] = $request->boolean('shuffle_questions');
+        $data['shuffle_options'] = $request->boolean('shuffle_options');
 
         $quiz->update($data);
 
@@ -86,16 +97,20 @@ class QuizController extends Controller
         
         $user = auth()->user();
         
-        // Ensure learner is enrolled for this module
-        if ($user->hasRole('learner')) {
-            $assignment = \App\Models\AssignedModule::where('training_module_id', $quiz->training_module_id)
-                ->where('user_id', $user->id)
-                ->first();
+        // Only enrolled learners may sit a quiz. Instructors and admins are
+        // excluded even when they can manage the module.
+        if (! $user->hasRole('learner')) {
+            return redirect()->route('modules.show', $quiz->module)
+                ->with('error', 'Only enrolled learners can take quizzes.');
+        }
 
-            if (! $assignment) {
-                return redirect()->route('modules.show', $quiz->module)
-                    ->with('error', 'You are not enrolled in this module or your enrollment is pending approval.');
-            }
+        $assignment = \App\Models\AssignedModule::where('training_module_id', $quiz->training_module_id)
+            ->where('user_id', $user->id)
+            ->first();
+
+        if (! $assignment) {
+            return redirect()->route('modules.show', $quiz->module)
+                ->with('error', 'You are not enrolled in this module or your enrollment is pending approval.');
         }
         
         // Check if user has already passed this quiz
@@ -138,12 +153,35 @@ class QuizController extends Controller
             }
         }
 
-        return view('quizzes.take', compact('quiz'));
+        // R8: attempt cap, cooldown and the countdown all start here.
+        $attempts = app(QuizAttemptService::class);
+
+        if ($blocked = $attempts->blockReason($quiz, $user)) {
+            return redirect()->route('modules.show', $quiz->module)->with('error', $blocked);
+        }
+
+        $attempt = $attempts->start($quiz, $user);
+        $secondsRemaining = $attempts->secondsRemaining($attempt);
+
+        // Order is presentation only; grading stays keyed on question/option ids.
+        $quiz = $attempts->applyShuffle($quiz);
+
+        return view('quizzes.take', compact('quiz', 'attempt', 'secondsRemaining'));
     }
 
     public function submit(Request $request, Quiz $quiz)
     {
         $quiz->load('questions.options');
+
+        // Same rule as take(): nobody writes quiz progress without an enrollment.
+        $enrolled = \App\Models\AssignedModule::where('training_module_id', $quiz->training_module_id)
+            ->where('user_id', $request->user()->id)
+            ->exists();
+
+        if (! $request->user()->hasRole('learner') || ! $enrolled) {
+            return redirect()->route('modules.show', $quiz->module)
+                ->with('error', 'Only enrolled learners can submit quizzes.');
+        }
 
         if ($quiz->questions->isEmpty()) {
             return redirect()
@@ -231,36 +269,17 @@ class QuizController extends Controller
 
         // Record Attempt and update module-level progress
         if ($percentageAuto !== null) {
-            $attemptCount = \App\Models\QuizAttempt::where('user_id', $request->user()->id)
-                ->where('quiz_id', $quiz->id)
-                ->count();
+            // Close the sitting that take() opened instead of starting a new row.
+            $attemptService = app(QuizAttemptService::class);
+            $attempt = $attemptService->openAttempt($quiz, $request->user())
+                ?? $attemptService->start($quiz, $request->user());
 
-            $attempt = \App\Models\QuizAttempt::create([
-                'user_id' => $request->user()->id,
-                'quiz_id' => $quiz->id,
-                'score' => $percentageAuto,
-                'status' => $passed ? 'passed' : 'failed',
-                'attempt_number' => $attemptCount + 1,
-            ]);
+            $attempt = $attemptService->finish($attempt, (float) $percentageAuto, $passed);
 
-            // Update module progress: quizzes contribute 50%
+            // Progress comes from the task list (single source of truth).
             $module = $quiz->module;
-            $userId = $request->user()->id;
-
-            $quizPortion = 50;
-            $quizPercentage = $passed ? $quizPortion : 0; // Only passed quizzes count toward the quiz portion
-
-            // Load or init progress and recompute aggregate
-            $progress = \App\Models\ModuleProgress::firstOrNew([
-                'training_module_id' => $module->id,
-                'user_id' => $userId,
-            ]);
-
-            $progress->quiz_percentage = $quizPercentage;
-            $progress->lesson_percentage = $progress->lesson_percentage ?? 0;
-            $progress->percentage = round(($progress->lesson_percentage ?? 0) + ($progress->quiz_percentage ?? 0), 1);
-            $progress->last_accessed_at = now();
-            $progress->save();
+            $progress = app(\App\Services\ProgressService::class)
+                ->recalculate($request->user()->id, $module->id);
 
             // Notify instructor about quiz attempt
             $assignment = \App\Models\AssignedModule::where('training_module_id', $module->id)

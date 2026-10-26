@@ -35,6 +35,7 @@ class RetakeRequestNotification extends Notification
             'item_type' => $itemType,
             'item_title' => $itemTitle,
             'type' => 'retake_request',
+            'url' => route('retake-requests.index'),
         ];
     }
 }

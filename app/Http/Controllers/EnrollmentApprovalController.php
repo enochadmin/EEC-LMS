@@ -60,28 +60,27 @@ class EnrollmentApprovalController extends Controller
         $user = $request->user();
         $module = TrainingModule::findOrFail($enrollmentRequest->training_module_id);
 
-        // Create actual assignment/enrollment
-        $assignment = AssignedModule::create([
-            'training_module_id' => $module->id,
-            'user_id' => $enrollmentRequest->user_id,
-            'assigned_by' => $user->id,
-            'due_date' => null,
-            'status' => 'in_progress',
-        ]);
-
-        // Initialize module progress
-        \App\Models\ModuleProgress::updateOrCreate(
+        // Create the enrollment (a unique index makes this idempotent).
+        $assignment = AssignedModule::firstOrCreate(
             [
                 'training_module_id' => $module->id,
-                'user_id' => $assignment->user_id,
+                'user_id' => $enrollmentRequest->user_id,
             ],
             [
-                'completed_lessons' => 0,
-                'total_lessons' => $module->lessons()->count(),
-                'percentage' => 0,
-                'last_accessed_at' => now(),
+                'assigned_by' => $user->id,
+                'due_date' => null,
+                'status' => 'in_progress',
             ]
         );
+
+        // Initialise progress from the module's task list.
+        app(\App\Services\ProgressService::class)->recalculate($assignment->user_id, $module->id);
+
+        $assignment->user->notify(new \App\Notifications\WorkflowNotification(
+            type: 'enrollment_approved',
+            message: "Your enrollment in '{$module->title}' was approved.",
+            url: route('modules.show', $module),
+        ));
 
         $enrollmentRequest->update(['status' => 'approved']);
 

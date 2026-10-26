@@ -226,6 +226,12 @@ class UserController extends Controller
             'password' => ['required', 'string', 'min:8', 'confirmed'],
             'role' => ['required', 'exists:roles,name'],
             'department_id' => ['nullable', 'exists:departments,id'],
+            'job_title' => ['nullable', 'string', 'max:120'],
+            'phone' => ['nullable', 'string', 'max:32'],
+            'office_location' => ['nullable', 'string', 'max:120'],
+            'employment_type' => ['nullable', 'string', 'max:32'],
+            'hire_date' => ['nullable', 'date'],
+            'manager_id' => ['nullable', 'exists:users,id'],
         ]);
 
         // Always generate a unique employee ID automatically (E00001, E00002, ...)
@@ -239,6 +245,12 @@ class UserController extends Controller
             'email' => $data['email'],
             'password' => Hash::make($data['password']),
             'department_id' => $data['department_id'] ?? null,
+            'job_title' => $data['job_title'] ?? null,
+            'phone' => $data['phone'] ?? null,
+            'office_location' => $data['office_location'] ?? null,
+            'employment_type' => $data['employment_type'] ?? null,
+            'hire_date' => $data['hire_date'] ?? null,
+            'manager_id' => $data['manager_id'] ?? null,
         ]);
 
         $user->assignRole($data['role']);
@@ -282,6 +294,12 @@ class UserController extends Controller
             'password' => ['nullable', 'string', 'min:8', 'confirmed'],
             'role' => ['required', 'exists:roles,name'],
             'department_id' => ['nullable', 'exists:departments,id'],
+            'job_title' => ['nullable', 'string', 'max:120'],
+            'phone' => ['nullable', 'string', 'max:32'],
+            'office_location' => ['nullable', 'string', 'max:120'],
+            'employment_type' => ['nullable', 'string', 'max:32'],
+            'hire_date' => ['nullable', 'date'],
+            'manager_id' => ['nullable', 'exists:users,id'],
         ]);
 
         $user->update([
@@ -290,6 +308,18 @@ class UserController extends Controller
             'name' => trim($data['first_name'] . ' ' . $data['last_name']),
             'email' => $data['email'],
             'department_id' => $data['department_id'] ?? null,
+            'job_title' => $data['job_title'] ?? null,
+            'phone' => $data['phone'] ?? null,
+            'office_location' => $data['office_location'] ?? null,
+            'employment_type' => $data['employment_type'] ?? null,
+            'hire_date' => $data['hire_date'] ?? null,
+            'manager_id' => $data['manager_id'] ?? null,
+            'job_title' => $data['job_title'] ?? null,
+            'phone' => $data['phone'] ?? null,
+            'office_location' => $data['office_location'] ?? null,
+            'employment_type' => $data['employment_type'] ?? null,
+            'hire_date' => $data['hire_date'] ?? null,
+            'manager_id' => $data['manager_id'] ?? null,
         ]);
 
         if ($request->filled('password')) {

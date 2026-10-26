@@ -1,7 +1,10 @@
 <?php
 
 use App\Http\Controllers\AssignmentController;
+use App\Http\Controllers\ActivityLogController;
+use App\Http\Controllers\BrandingController;
 use App\Http\Controllers\CertificateController;
+use App\Http\Controllers\CertificateVerificationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\KnowledgeFileController;
 use App\Http\Controllers\LessonController;
@@ -10,6 +13,7 @@ use App\Http\Controllers\QuizController;
 use App\Http\Controllers\TrainingModuleController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\DepartmentController;
+use App\Http\Controllers\DiscoverController;
 use App\Http\Controllers\CategoryController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
@@ -23,6 +27,10 @@ use App\Http\Controllers\Auth\ConfirmablePasswordController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\ModuleCompletionApprovalController;
 use App\Http\Controllers\EnrollmentApprovalController;
+use App\Http\Controllers\LearningTimeController;
+use App\Http\Controllers\ModuleTemplateController;
+use App\Http\Controllers\ReportController;
+use App\Http\Controllers\RoleController;
 
 
 
@@ -31,6 +39,10 @@ Route::get('/', function () {
         ? redirect()->route('dashboard')
         : view('welcome');
 })->name('home');
+
+// Public certificate verification — no login required (linked from the PDF).
+Route::get('/verify/{number}', [CertificateVerificationController::class, 'show'])
+    ->name('certificates.verify');
 
 // Route::get('/register', [RegisteredUserController::class, 'create'])
 //     ->middleware('guest')
@@ -101,12 +113,29 @@ Route::get('/', function () {
 Route::middleware(['auth'])->group(function () {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
 
+    // Monitoring reports (admins see everything, instructors see their own modules)
+    Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
+Route::get('/reports/export', [ReportController::class, 'export'])->name('reports.export');
+
+    // Learning-time heartbeat used by lesson/module pages
+    Route::post('api/learning-time', [LearningTimeController::class, 'store'])->name('api.learning-time');
+
     // Profile routes
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
     // Training Modules
+    // The two creation paths are declared before the resource route so
+    // "create/template" can never be mistaken for a module id.
+    Route::get('modules/create/manual', [TrainingModuleController::class, 'createManual'])->name('modules.create.manual');
+    Route::get('modules/create/template', [ModuleTemplateController::class, 'structure'])->name('modules.create.template');
+    Route::post('modules/create/template/structure', [ModuleTemplateController::class, 'storeStructure'])->name('modules.create.template.structure');
+    Route::get('modules/create/template/content', [ModuleTemplateController::class, 'content'])->name('modules.create.template.content');
+    Route::get('modules/create/template/download', [ModuleTemplateController::class, 'downloadTemplate'])->name('modules.create.template.download');
+    Route::post('modules/create/template', [ModuleTemplateController::class, 'store'])->name('modules.create.template.store');
+    Route::get('discover', [DiscoverController::class, 'index'])->name('discover.index');
+
     Route::resource('modules', TrainingModuleController::class);
     Route::post('modules/{module}/publish', [TrainingModuleController::class, 'publish'])
         ->middleware('permission:manage modules')
@@ -137,6 +166,7 @@ Route::middleware(['auth'])->group(function () {
 
     // Certificates
     Route::get('certificates', [CertificateController::class, 'index'])->name('certificates.index');
+    Route::get('certificates/{certificate}/view', [CertificateController::class, 'view'])->name('certificates.view');
     Route::get('certificates/{certificate}/download', [CertificateController::class, 'download'])->name('certificates.download');
     
     // Admin Certificate Management
@@ -146,19 +176,32 @@ Route::middleware(['auth'])->group(function () {
     Route::post('admin/certificates/issue/{user}/{module}', [CertificateController::class, 'issue'])
         ->middleware('permission:issue certificates')
         ->name('admin.certificates.issue');
+    Route::delete('admin/certificates/{certificate}', [CertificateController::class, 'destroy'])
+        ->middleware('permission:issue certificates')
+        ->name('admin.certificates.destroy');
+
+    // Admin-only system tooling
+    Route::middleware('role:admin')->group(function () {
+        Route::resource('roles', RoleController::class)->except(['show']);
+        Route::get('admin/activity', [ActivityLogController::class, 'index'])->name('admin.activity.index');
+        Route::get('admin/branding', [BrandingController::class, 'index'])->name('admin.branding.index');
+        Route::post('admin/branding', [BrandingController::class, 'update'])->name('admin.branding.update');
+        Route::post('admin/branding/signature/{user}', [BrandingController::class, 'signature'])->name('admin.branding.signature');
+        Route::delete('admin/branding/signature/{user}', [BrandingController::class, 'removeSignature'])->name('admin.branding.signature.destroy');
+    });
     // Knowledge Files
     Route::resource('knowledge', KnowledgeFileController::class)->except(['show']);
     Route::get('knowledge/{knowledge}/download', [KnowledgeFileController::class, 'download'])->name('knowledge.download');
 
     // User Management (Admin only)
-    Route::resource('users', UserController::class)->middleware('permission:manage users');
-    // Import users from template and download template
-    // Allow optional file extension so URLs like /users/template.csv also work
+    // Template/import routes must be registered BEFORE the {user} resource route,
+    // otherwise GET /users/template is bound as a user id and 404s.
     Route::get('users/template/{extension?}', [UserController::class, 'downloadTemplate'])
         ->where('extension', 'csv|xls|xlsx')
         ->name('users.template')
         ->middleware('permission:manage users');
     Route::post('users/import', [UserController::class, 'import'])->name('users.import')->middleware('permission:manage users');
+    Route::resource('users', UserController::class)->middleware('permission:manage users');
 
     // Department Management (Admin only)
     Route::resource('departments', DepartmentController::class)->middleware('permission:manage users');
@@ -213,13 +256,17 @@ Route::middleware(['auth'])->group(function () {
     Route::patch('module-approvals/{approval}/reject', [ModuleCompletionApprovalController::class, 'reject'])
         ->name('module-approvals.reject');
 
-    // Lesson Completion Approvals
+    // Lesson Completion Approvals (their own page — no longer mixed into retake requests)
+    Route::get('lesson-approvals', [App\Http\Controllers\LessonCompletionController::class, 'index'])
+        ->middleware('permission:assign modules|manage users|manage modules|issue certificates')
+        ->name('lesson-approvals.index');
     Route::patch('lesson-completions/{completion}/approve', [App\Http\Controllers\LessonCompletionController::class, 'approve'])->name('lesson-completions.approve');
-    Route::delete('lesson-completions/{completion}/reject', [App\Http\Controllers\LessonCompletionController::class, 'reject'])->name('lesson-completions.reject');
+    Route::patch('lesson-completions/{completion}/reject', [App\Http\Controllers\LessonCompletionController::class, 'reject'])->name('lesson-completions.reject');
 
     // Notifications
     Route::get('notifications', [App\Http\Controllers\NotificationController::class, 'index'])->name('notifications.index');
     Route::get('notifications/unread', [App\Http\Controllers\NotificationController::class, 'getUnread'])->name('notifications.unread');
+    Route::get('notifications/{id}/open', [App\Http\Controllers\NotificationController::class, 'open'])->name('notifications.open');
     Route::post('notifications/{id}/read', [App\Http\Controllers\NotificationController::class, 'markAsRead'])->name('notifications.read');
     Route::post('notifications/read-all', [App\Http\Controllers\NotificationController::class, 'markAllAsRead'])->name('notifications.read-all');
 });

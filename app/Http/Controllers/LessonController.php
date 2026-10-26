@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Lesson;
+use App\Models\LessonCompletion;
 use App\Models\TrainingModule;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -51,40 +52,26 @@ class LessonController extends Controller
             }
         }
 
-        // Check if lesson is completed
-        // Check if lesson is completed (approved)
-        $completion = \App\Models\LessonCompletion::where('user_id', $user->id)
+        $completion = LessonCompletion::where('user_id', $user->id)
             ->where('lesson_id', $lesson->id)
             ->first();
 
-        if ($completion) {
-            if ($completion->status === 'approved') {
-                // Check for pending retake request
-                $existingRequest = \App\Models\RetakeRequest::where('user_id', $user->id)
-                    ->where('requestable_type', \App\Models\Lesson::class)
-                    ->where('requestable_id', $lesson->id)
-                    ->where('status', 'pending')
-                    ->first();
-
-                return view('retake_requests.locked', [
-                    'type' => 'lesson',
-                    'item' => $lesson,
-                    'module' => $module,
-                    'existingRequest' => $existingRequest
-                ]);
-            } elseif ($completion->status === 'pending') {
-                // Show pending approval view
-                 return view('retake_requests.locked', [
-                    'type' => 'lesson',
-                    'item' => $lesson,
-                    'module' => $module,
-                    'existingRequest' => (object)['status' => 'pending_completion', 'created_at' => $completion->created_at], // Mock request object
-                    'isCompletionRequest' => true
-                ]);
-            }
+        // Only a submission awaiting review blocks the page. Approved lessons
+        // stay readable so learners can revise material they have finished.
+        if ($completion && $completion->status === 'pending') {
+            return view('retake_requests.locked', [
+                'type' => 'lesson',
+                'item' => $lesson,
+                'module' => $module,
+                'existingRequest' => (object) [
+                    'status' => 'pending',
+                    'created_at' => $completion->created_at,
+                ],
+                'isCompletionRequest' => true,
+            ]);
         }
 
-        return view('lessons.show', compact('module', 'lesson'));
+        return view('lessons.show', compact('module', 'lesson', 'completion'));
     }
 
     /**
@@ -107,85 +94,61 @@ class LessonController extends Controller
             return redirect()->back()->with('error', 'You are not enrolled in this module.');
         }
 
-        // create lesson completion if not exists
-        $created = \App\Models\LessonCompletion::firstOrCreate(
-            [
-                'user_id' => $user->id,
-                'training_module_id' => $module->id,
-                'lesson_id' => $lesson->id,
-            ],
-            [
-                'status' => 'pending', // Default to pending for approval
-            ]
-        );
-
-        if ($created->wasRecentlyCreated) {
-             \Illuminate\Support\Facades\Log::info("Lesson completion requested by user {$user->id} for lesson {$lesson->id}. Status: pending");
-             
-             // Notify instructor about the request
-             // We can reuse the ModuleCompletedNotification logic but for Lesson Completion Request?
-             // Or just rely on the dashboard.
-             // For now, let's log it.
-        }
-
-        // Only count APPROVED completions for progress
-        $completedCount = \App\Models\LessonCompletion::where('training_module_id', $module->id)
-            ->where('user_id', $user->id)
-            ->where('status', 'approved')
-            ->count();
-
-        $totalLessons = $module->lessons()->count();
-
-        // Lessons contribute 50% of total module score
-        $lessonPortion = 50;
-        $lessonPercentage = $totalLessons > 0 ? ($completedCount / $totalLessons) * $lessonPortion : 0;
-
-        // Load or init progress and recompute aggregate
-        $progress = \App\Models\ModuleProgress::firstOrNew([
-                'training_module_id' => $module->id,
-                'user_id' => $user->id,
+        $completion = LessonCompletion::firstOrNew([
+            'user_id' => $user->id,
+            'training_module_id' => $module->id,
+            'lesson_id' => $lesson->id,
         ]);
 
-        $progress->completed_lessons = $completedCount;
-        $progress->total_lessons = $totalLessons;
-        $progress->lesson_percentage = $lessonPercentage;
-        $progress->quiz_percentage = $progress->quiz_percentage ?? 0;
-        $progress->percentage = round(($progress->lesson_percentage ?? 0) + ($progress->quiz_percentage ?? 0), 1);
-        $progress->last_accessed_at = now();
-        $progress->save();
+        if ($completion->exists && $completion->status === 'approved') {
+            if (request()->wantsJson() || request()->ajax()) {
+                return response()->json([
+                    'training_module_id' => $module->id,
+                    'status' => 'approved',
+                ]);
+            }
 
-        // If fully completed, notify instructor/manager
-        if ($percentage >= 100) {
-            // NOTE: We do NOT automatically mark assignment as completed. 
-            // The instructor must review and manually complete it.
-            
-            \Illuminate\Support\Facades\Log::info("Module completed by user {$user->id}. Checking for notification target.");
+            return redirect()
+                ->route('modules.lessons.show', [$module, $lesson])
+                ->with('status', 'This lesson is already approved.');
+        }
 
-            // Notify the person who assigned the module
-            if ($assignment && $assignment->assigner) {
-                \Illuminate\Support\Facades\Log::info("Notifying assigner: {$assignment->assigner->id}");
-                $assignment->assigner->notify(new \App\Notifications\ModuleCompletedNotification($module, $user));
-            } elseif ($module->creator) {
-                // Fallback to creator if no specific assigner (e.g. self-enrolled)
-                \Illuminate\Support\Facades\Log::info("Notifying creator: {$module->creator->id}");
-                $module->creator->notify(new \App\Notifications\ModuleCompletedNotification($module, $user));
-            } else {
-                \Illuminate\Support\Facades\Log::warning("No one to notify for module completion. Module ID: {$module->id}");
+        $isNewSubmission = ! $completion->exists || $completion->status === 'rejected';
+
+        if ($isNewSubmission) {
+            $completion->status = 'pending';
+            $completion->rejection_reason = null;
+            $completion->reviewed_by = null;
+            $completion->reviewed_at = null;
+            $completion->save();
+
+            $reviewer = $assignment->assigner ?? $module->creator;
+
+            if ($reviewer) {
+                $reviewer->notify(new \App\Notifications\WorkflowNotification(
+                    type: 'lesson_submitted',
+                    message: "{$user->name} submitted the lesson '{$lesson->title}' for review.",
+                    url: route('lesson-approvals.index'),
+                ));
             }
         }
 
-        // If this was an AJAX/json request, return the updated progress payload
+        $progress = app(\App\Services\ProgressService::class)->recalculate($user->id, $module->id);
+
         if (request()->wantsJson() || request()->ajax()) {
             return response()->json([
                 'training_module_id' => $module->id,
-                'completed_lessons' => $completedCount,
-                'total_lessons' => $totalLessons,
-                'percentage' => $progress->percentage ?? null,
-                'assignment_status' => $assignment ? $assignment->status : null,
+                'completed_lessons' => $progress->completed_lessons,
+                'total_lessons' => $progress->total_lessons,
+                'percentage' => $progress->percentage,
+                'status' => $completion->status,
+                'assignment_status' => $assignment->status,
             ]);
         }
 
-        return redirect()->route('modules.show', $module)->with('status', 'Lesson completion requested. Waiting for approval.');
+        return redirect()
+            ->route('modules.lessons.show', [$module, $lesson])
+            ->with('status', 'Lesson submitted. Waiting for your instructor to review it.');
     }
 
     public function create(Request $request)
@@ -204,7 +167,7 @@ class LessonController extends Controller
             'training_module_id' => ['required', 'exists:training_modules,id'],
             'title' => ['required', 'string', 'max:255'],
             'content' => ['nullable', 'string'],
-            'video_file' => ['nullable', 'file', 'mimes:mp4,avi,mov,wmv', 'max:51200'], // 50MB max for MP4
+            'video_file' => ['nullable', 'file', 'mimes:mp4,avi,mov,wmv', 'max:30720'], // 30MB — must stay under PHP's upload_max_filesize (40M)
             'pdf_file' => ['nullable', 'file', 'mimes:pdf', 'max:10240'], // 10MB max
             'youtube_link' => ['nullable', 'url', 'max:255'],
             'youtube_links' => ['nullable', 'array'],
@@ -238,6 +201,9 @@ class LessonController extends Controller
         $data['youtube_links'] = !empty($links) ? json_encode($links) : null;
 
         $lesson = Lesson::create($data);
+
+        // Tasks changed: refresh totals for everyone enrolled.
+        app(\App\Services\ProgressService::class)->recalculateForModule($lesson->training_module_id);
 
         return redirect()
             ->route('modules.show', $lesson->module)
@@ -335,6 +301,9 @@ class LessonController extends Controller
         }
         
         $lesson->delete();
+
+        // A task was removed: shrink the totals for enrolled learners.
+        app(\App\Services\ProgressService::class)->recalculateForModule($module->id);
 
         return redirect()
             ->route('modules.show', $module)

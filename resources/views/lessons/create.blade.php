@@ -55,7 +55,7 @@
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">
                                     {{ __('Video File (MP4)') }}
-                                    <span class="text-xs text-gray-500">(Max: 50MB)</span>
+                                    <span class="text-xs text-gray-500">(Max: 30MB — MP4, MOV, AVI, WMV)</span>
                                 </label>
                                 <input type="file" name="video_file" accept=".mp4,.avi,.mov,.wmv"
                                     class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />

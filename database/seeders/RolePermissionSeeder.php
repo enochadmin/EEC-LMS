@@ -23,6 +23,7 @@ class RolePermissionSeeder extends Seeder
             'view certificates',
             'issue certificates',
             'manage users',
+            'assign advisors',
         ];
 
         foreach ($permissions as $permission) {
@@ -37,6 +38,15 @@ class RolePermissionSeeder extends Seeder
                 'manage quizzes',
                 'manage knowledge',
                 'assign modules',
+                'issue certificates',
+            ],
+            'instructor_manager' => [
+                'manage modules',
+                'manage lessons',
+                'manage quizzes',
+                'assign modules',
+                'assign advisors',
+                'manage knowledge',
                 'issue certificates',
             ],
             'learner' => [

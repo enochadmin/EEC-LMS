@@ -394,6 +394,43 @@
             </div>
             @endif
 
+            <!-- Continue learning (resume point) -->
+            @if(!empty($resume))
+            <div class="bg-white shadow-sm sm:rounded-lg mb-8 border-l-4 border-indigo-500">
+                <div class="p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
+                    <div class="min-w-0">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-indigo-600">Continue learning</p>
+                        <h3 class="text-lg font-semibold text-gray-900 mt-1 truncate">{{ $resume['module']->title }}</h3>
+                        <p class="text-sm text-gray-500 mt-1">
+                            @if($resume['lesson'])
+                                Next: {{ $resume['lesson']->title }}
+                            @else
+                                All lessons done — finish the assessment
+                            @endif
+                            @if($resume['lessons_left'] > 0)
+                                <span class="text-gray-400">·</span> {{ $resume['lessons_left'] }} {{ \Illuminate\Support\Str::plural('lesson', $resume['lessons_left']) }} left
+                            @endif
+                            @if($resume['minutes_left'] > 0)
+                                <span class="text-gray-400">·</span> about {{ $resume['minutes_left'] }} min
+                            @endif
+                        </p>
+                        <div class="mt-3 w-full max-w-sm bg-gray-200 rounded-full h-2">
+                            <div class="bg-indigo-600 h-2 rounded-full" style="width: {{ min(100, $resume['percentage']) }}%"></div>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-1">{{ number_format($resume['percentage'], 0) }}% complete</p>
+                    </div>
+                    <a href="{{ $resume['lesson']
+                            ? route('modules.lessons.show', [$resume['module']->id, $resume['lesson']->id])
+                            : route('modules.show', $resume['module']->id) }}"
+                       class="inline-flex items-center justify-center px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition whitespace-nowrap">
+                        {{ $resume['lesson'] ? 'Resume lesson' : 'Open module' }}
+                        <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+                    </a>
+                </div>
+            </div>
+            @endif
             <!-- User Progress (for learners) -->
             @if(!$showReports && isset($userProgress) && $userProgress->count() > 0)
             <div class="bg-white shadow-sm sm:rounded-lg mb-8">

@@ -2,12 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AssignedModule;
 use App\Models\ModuleCompletionApproval;
-use App\Models\Certificate;
 use App\Models\TrainingModule;
-use App\Models\User;
+use App\Notifications\WorkflowNotification;
+use App\Services\CertificateService;
+use App\Services\ProgressService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 
 class ModuleCompletionApprovalController extends Controller
 {
@@ -20,14 +21,13 @@ class ModuleCompletionApprovalController extends Controller
     }
 
     /**
-     * Learner requests module completion approval after finishing lessons & quizzes.
+     * Learner requests module completion approval after finishing every task.
      */
     public function request(Request $request, TrainingModule $module)
     {
         $user = $request->user();
 
-        // Ensure learner is enrolled/assigned
-        $assignment = \App\Models\AssignedModule::where('training_module_id', $module->id)
+        $assignment = AssignedModule::where('training_module_id', $module->id)
             ->where('user_id', $user->id)
             ->first();
 
@@ -35,68 +35,58 @@ class ModuleCompletionApprovalController extends Controller
             return redirect()->back()->with('error', 'You are not enrolled in this module.');
         }
 
-        // Ensure all lessons are approved
-        $totalLessons = $module->lessons()->count();
-        $completedLessons = \App\Models\LessonCompletion::where('training_module_id', $module->id)
-            ->where('user_id', $user->id)
-            ->where('status', 'approved')
-            ->count();
+        // Gate on the task-based calculation, not a lesson/quiz split.
+        $summary = app(ProgressService::class)->summary($user->id, $module->id);
 
-        if ($totalLessons > 0 && $completedLessons < $totalLessons) {
-            return redirect()->back()->with('error', 'Please complete and get approval for all lessons before requesting module completion.');
+        if ($summary['total_tasks'] === 0) {
+            return redirect()->back()->with('error', 'This module has no lessons or quizzes yet.');
         }
 
-        // Ensure quizzes (if any) are passed
-        $quizIds = $module->quizzes()->pluck('id');
-        $hasQuiz = $quizIds->isNotEmpty();
-        $hasPassedQuiz = false;
-
-        if ($hasQuiz) {
-            $hasPassedQuiz = \App\Models\QuizAttempt::where('user_id', $user->id)
-                ->whereIn('quiz_id', $quizIds)
-                ->where('status', 'passed')
-                ->exists();
-
-            if (! $hasPassedQuiz) {
-                return redirect()->back()->with('error', 'You must pass the module quiz before requesting completion approval.');
-            }
+        if ($summary['completed_tasks'] < $summary['total_tasks']) {
+            return redirect()->back()->with(
+                'error',
+                "You still have {$summary['remaining_tasks']} task(s) to finish: "
+                . "{$summary['completed_lessons']}/{$summary['total_lessons']} lessons approved, "
+                . "{$summary['completed_quizzes']}/{$summary['total_quizzes']} quizzes passed."
+            );
         }
 
-        // Create or reuse pending approval
-        $approval = ModuleCompletionApproval::firstOrCreate(
-            [
-                'training_module_id' => $module->id,
-                'user_id' => $user->id,
-            ],
-            [
-                'status' => 'pending',
-            ]
-        );
+        $approval = ModuleCompletionApproval::firstOrNew([
+            'training_module_id' => $module->id,
+            'user_id' => $user->id,
+        ]);
 
-        if (! $approval->wasRecentlyCreated && $approval->status === 'pending') {
-            return redirect()->back()->with('status', 'You already have a pending completion request for this module.');
-        }
-
-        if ($approval->status === 'approved') {
+        if ($approval->exists && $approval->status === 'approved') {
             return redirect()->back()->with('status', 'This module has already been approved and completed.');
         }
 
-        // Notify instructor/manager
-        $assignment = \App\Models\AssignedModule::where('training_module_id', $module->id)
+        if ($approval->exists && $approval->status === 'pending') {
+            return redirect()->back()->with('status', 'You already have a pending completion request for this module.');
+        }
+
+        // New request, or a fresh attempt after a rejection.
+        $approval->status = 'pending';
+        $approval->approved_by = null;
+        $approval->approved_at = null;
+        $approval->notes = null;
+        $approval->save();
+
+        $assignment = AssignedModule::where('training_module_id', $module->id)
             ->where('user_id', $user->id)
             ->with('assigner')
             ->first();
 
-        $notifiable = $assignment?->assigner ?? $module->creator;
-        if ($notifiable) {
-            $notifiable->notify(new \App\Notifications\ModuleCompletionApprovalRequestNotification($module, $user));
+        $reviewer = $assignment?->assigner ?? $module->creator;
+
+        if ($reviewer) {
+            $reviewer->notify(new \App\Notifications\ModuleCompletionApprovalRequestNotification($module, $user));
         }
 
         return redirect()->back()->with('status', 'Module completion request submitted. Waiting for instructor approval.');
     }
 
     /**
-     * Show pending module completion approvals for instructors/managers.
+     * Show pending module completion approvals.
      */
     public function index(Request $request)
     {
@@ -105,11 +95,13 @@ class ModuleCompletionApprovalController extends Controller
             ->latest();
 
         if ($search = $request->get('search')) {
-            $query->whereHas('learner', function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
-            })->orWhereHas('module', function ($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%");
+            $query->where(function ($q) use ($search) {
+                $q->whereHas('learner', function ($sub) use ($search) {
+                    $sub->where('name', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%");
+                })->orWhereHas('module', function ($sub) use ($search) {
+                    $sub->where('title', 'like', "%{$search}%");
+                });
             });
         }
 
@@ -119,15 +111,17 @@ class ModuleCompletionApprovalController extends Controller
     }
 
     /**
-     * Approve a module completion, mark assignment completed and issue certificate.
+     * Approve a completion, mark the assignment completed and issue the certificate.
      */
     public function approve(Request $request, ModuleCompletionApproval $approval)
     {
-        $this->authorize('issue certificates');
-
         if ($approval->status !== 'pending') {
             return redirect()->back()->with('status', 'This approval request has already been processed.');
         }
+
+        $data = $request->validate([
+            'valid_until' => ['nullable', 'date', 'after:today'],
+        ]);
 
         $approval->update([
             'status' => 'approved',
@@ -136,53 +130,39 @@ class ModuleCompletionApprovalController extends Controller
         ]);
 
         $module = $approval->module;
-        $user = $approval->learner;
+        $learner = $approval->learner;
 
-        // Mark assignment as completed if exists
-        \App\Models\AssignedModule::where('training_module_id', $module->id)
-            ->where('user_id', $user->id)
+        AssignedModule::where('training_module_id', $module->id)
+            ->where('user_id', $learner->id)
             ->update(['status' => 'completed']);
 
-        // Ensure module progress is marked as fully completed for this learner
-        $totalLessons = $module->lessons()->count();
-        \App\Models\ModuleProgress::updateOrCreate(
-            [
-                'training_module_id' => $module->id,
-                'user_id' => $user->id,
-            ],
-            [
-                'completed_lessons' => $totalLessons,
-                'total_lessons' => $totalLessons,
-                'percentage' => 100,
-                'last_accessed_at' => now(),
-            ]
+        // Recalculate from tasks, then treat approval as the final state.
+        $progress = app(ProgressService::class)->recalculate($learner->id, $module->id);
+
+        if ((float) $progress->percentage < 100) {
+            $progress->percentage = 100;
+            $progress->save();
+        }
+
+        app(CertificateService::class)->issue(
+            $learner,
+            $module,
+            $request->user()->id,
+            filled($data['valid_until'] ?? null) ? \Illuminate\Support\Carbon::parse($data['valid_until']) : null,
         );
 
-        // Issue certificate if not already issued
-        $existing = Certificate::where('user_id', $user->id)
-            ->where('training_module_id', $module->id)
-            ->first();
-
-        if (! $existing) {
-            $certificate = Certificate::create([
-                'user_id' => $user->id,
-                'training_module_id' => $module->id,
-                'certificate_number' => 'CERT-' . strtoupper(uniqid()),
-                'file_path' => 'certificates/' . uniqid() . '.pdf',
-                'issued_at' => now(),
-            ]);
-
-            $this->generatePdf($certificate);
-
-            // Notify learner
-            $user->notify(new \App\Notifications\CertificateIssuedNotification($certificate));
-        }
+        $learner->notify(new WorkflowNotification(
+            type: 'module_approved',
+            message: "Your completion of '{$module->title}' was approved. Your certificate is ready.",
+            url: route('certificates.index'),
+        ));
 
         return redirect()->back()->with('status', 'Module completion approved and certificate issued.');
     }
 
     /**
-     * Reject a module completion approval request.
+     * Reject a completion request. A reason is required so the learner knows
+     * what to fix before requesting again.
      */
     public function reject(Request $request, ModuleCompletionApproval $approval)
     {
@@ -190,29 +170,25 @@ class ModuleCompletionApprovalController extends Controller
             return redirect()->back()->with('status', 'This approval request has already been processed.');
         }
 
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ], [
+            'reason.required' => 'Please give the learner a reason for the rejection.',
+        ]);
+
         $approval->update([
             'status' => 'rejected',
             'approved_by' => $request->user()->id,
             'approved_at' => now(),
+            'notes' => $data['reason'],
         ]);
 
-        return redirect()->back()->with('status', 'Module completion request rejected.');
-    }
+        $approval->learner->notify(new WorkflowNotification(
+            type: 'module_rejected',
+            message: "Your completion of '{$approval->module->title}' was not approved: {$data['reason']}",
+            url: route('modules.show', $approval->module),
+        ));
 
-    /**
-     * Generate a PDF certificate file (mirrors CertificateController::generatePdf).
-     */
-    protected function generatePdf(Certificate $certificate): void
-    {
-        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('certificates.pdf', compact('certificate'));
-        $pdf->setPaper('a4', 'landscape');
-
-        if (! Storage::disk('public')->exists('certificates')) {
-            Storage::disk('public')->makeDirectory('certificates');
-        }
-
-        Storage::disk('public')->put($certificate->file_path, $pdf->output());
+        return redirect()->back()->with('status', 'Module completion request rejected. The learner has been notified.');
     }
 }
-
-

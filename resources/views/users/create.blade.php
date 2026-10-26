@@ -94,6 +94,37 @@
                             <p class="text-sm text-red-600 mt-1">{{ $message }}</p>
                         @enderror
                     </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">{{ __('Job title') }}</label>
+                            <input name="job_title" value="{{ old('job_title') }}" placeholder="{{ __('e.g. Safety Officer') }}"
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">{{ __('Phone') }}</label>
+                            <input name="phone" value="{{ old('phone') }}" placeholder="+251 ..."
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">{{ __('Office / location') }}</label>
+                            <input name="office_location" value="{{ old('office_location') }}"
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">{{ __('Employment type') }}</label>
+                            <select name="employment_type" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                                <option value="">{{ __('Not set') }}</option>
+                                @foreach(['Permanent', 'Contract', 'Temporary', 'Intern'] as $type)
+                                    <option value="{{ $type }}" @selected(old('employment_type') === $type)>{{ $type }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">{{ __('Hire date') }}</label>
+                            <input type="date" name="hire_date" value="{{ old('hire_date') }}"
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
+                        </div>
+                    </div>
 
                     <div class="flex items-center justify-end gap-3">
                         <a href="{{ route('users.index') }}" class="text-gray-600 hover:underline">

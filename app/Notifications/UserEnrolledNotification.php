@@ -31,6 +31,7 @@ class UserEnrolledNotification extends Notification
             'user_name' => $this->assignment->user->name,
             'module_title' => $this->assignment->module->title,
             'type' => 'enrollment',
+            'url' => route('modules.show', $this->assignment->training_module_id),
         ];
     }
 }
